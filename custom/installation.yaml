@@ -1,0 +1,11 @@
+distribution_code_name: Squirrel
+distribution_name: "鼠鬚管"
+distribution_version: 0.16.2
+install_time: "Mon Nov  6 23:34:18 2023"
+rime_version: 1.8.5
+
+# 本机的 ID 标志，默认是一串 UUID
+# 生成的文件夹是这个名字，可以改成更好识别的名称
+installation_id: "MM-SA"
+# 同步的路径，默认是当前配置目录下的 `sync/`
+sync_dir: "/Users/kerronex/Documents/config/rime"
