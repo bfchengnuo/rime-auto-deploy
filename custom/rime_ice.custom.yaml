@@ -62,8 +62,11 @@ patch:
   pin_cand_filter:
     # 格式：编码<Tab>字词1<Space>字词2……
     # ⚙️ 以下是个人习惯，仅供参考，推荐打补丁用自己的习惯覆盖。
-    - youd  有点
-    - l  了
+    - "youd\t有点"
+    - "l\t了"
+    - "w\t我"
+    - "s\t是"
+    - "n\t你"
   
   # 拼写设定
   speller:
