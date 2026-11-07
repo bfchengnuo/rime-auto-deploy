@@ -1,3 +1,3 @@
 #!/usr/bin/env ruby
 
-require "./installer"
+require_relative "installer"

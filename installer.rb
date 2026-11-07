@@ -1,8 +1,9 @@
 #!/usr/bin/env ruby
 
-require "./lib/core"
-require "./lib/config"
-require "./share/upgrade"
+require_relative "lib/core"
+require_relative "lib/config"
+require_relative "share/upgrade"
+require_relative "share/personal_data"
 
 module OSPatch
   def check_os
@@ -33,7 +34,7 @@ module RimeDeploy
     end
 
     def run
-      require "./os/#{@osname}"
+      require_relative "os/#{@osname}"
       instance_eval("#{@osname}JobGroup.new.call")
     end
   end

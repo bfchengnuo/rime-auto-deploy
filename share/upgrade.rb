@@ -3,12 +3,11 @@ module RimeDeploy
     class UpgradeRimeAutoDeployJob < Job
       def call
         puts "Upgrade `Rime Auto Deploy` script ..."
-        project_path = File.expand_path(Dir.pwd)
+        project_path = File.expand_path("..", __dir__)
         if File.directory?(File.join(project_path, ".git"))
           puts "Git repository found."
-          system("cd #{project_path} && git remote get-url origin")
           puts "Try upgrading..."
-          system("cd #{project_path} && git pull")
+          upgrade_repository(project_path)
         else
           puts "You can download the latest version from here."
           puts "https://github.com/Mark24Code/rime-auto-deploy"
@@ -23,18 +22,10 @@ module RimeDeploy
         config_abs_path = File.expand_path(Store.config_path)
         if File.directory?(File.join(config_abs_path, ".git"))
           puts "Git repository found."
-          system("cd #{config_abs_path} && git remote get-url origin")
           puts "Try upgrading..."
-          system("cd #{config_abs_path} && git pull")
+          upgrade_repository(config_abs_path)
         else
-          puts "Error:".yellow
-          puts "Rime Config seems broken. You may delete the directory.".red
-          puts "You can:"
-          puts "Rerun the deploy script from start choose [Auto Mode] to reinstall."
-          puts ""
-          puts "After 5 seconds, will go to [Upgrade Mode].".yellow
-          sleep 5
-          throw :halt, :run_jobs_upgrade
+          raise RimeDeployError, "Rime directory is not a Git checkout. Keep your data and back it up before migrating: #{config_abs_path}"
         end
 
         return :next

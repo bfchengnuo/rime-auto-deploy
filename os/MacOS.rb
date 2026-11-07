@@ -6,7 +6,7 @@ module RimeDeploy
     class InstallRimeJob < Job
       def call
         puts intro
-        system(InstallCmd)
+        raise RimeDeployError, "Squirrel installation failed." unless system(InstallCmd)
         sleep 1
         return :next
       end
@@ -15,31 +15,21 @@ module RimeDeploy
     class BackupRimeConfigJob < Job
       def call
         puts intro
-        system(
-          "mv #{Store.config_path} #{Store.config_path}.#{Time.now.to_i}.old"
-        )
-        sleep 1
-        return :next
+        backup_rime_config
       end
     end
 
     class CloneConfigJob < Job
       def call
         puts intro
-        system(
-          "git clone --depth=1 #{Config::RIME_CONFIG_REPO} #{Store.config_path}"
-        )
-        sleep 1
-        return :next
+        clone_rime_config
       end
     end
 
     class CopyCustomConfigJob < Job
       def call
         puts intro
-        system("cp ./custom/*.yaml #{Store.config_path}/")
-        sleep 1
-        return :next
+        copy_custom_config
       end
     end
 
@@ -47,9 +37,9 @@ module RimeDeploy
       def call
         puts ""
         puts "Tips: When finished all jobs. You need to do follow:".yellow
-        puts "1) Restart system."
-        puts "2) open Rime input method setting pane and click " +
-               "DEPLOY".yellow + " button."
+        puts "Start the input method again if you stopped it."
+        puts "After changing configuration or restoring personal data, click " +
+               "DEPLOY".yellow + " in the Rime menu. Export alone needs no deployment."
         puts "Enjoy~ 🍻"
         puts "more info:".yellow
         puts "Config path: #{Store.config_path}/"

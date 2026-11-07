@@ -1,3 +1,7 @@
+require "fileutils"
+require "tmpdir"
+require "tempfile"
+
 module FontStylePatch
   RESET_COLOR = "\e[0m" #重置所有颜色和样式
   COLORS = {
@@ -33,8 +37,9 @@ module RimeDeploy
   end
 
   class ChooseSession
-    def initialize(items)
+    def initialize(items, default: nil)
       @items = items #[[intro, method]] auto index
+      @default = default
     end
 
     def call
@@ -47,11 +52,14 @@ module RimeDeploy
           puts "[#{index + 1}] " + item[0]
         end
         puts "Tips: input the index. e.g: 1; Ctrl-C exit."
+        puts "Enter selects #{@default}." if @default
         puts "Message: #{message}".red if message
         print ">>".green
-        choose_mode = gets
+        choose_mode = $stdin.gets
+        raise RimeDeployError, "Input ended without a selection." unless choose_mode
         choose_index = choose_mode.strip
-        if choose_index =~ /\d+/ && choose_index.to_i <= @items.length
+        choose_index = @default.to_s if choose_index.empty? && @default
+        if choose_index =~ /\A[1-9]\d*\z/ && choose_index.to_i <= @items.length
           choose = @items[choose_index.to_i - 1]
           break
         else
@@ -87,6 +95,79 @@ module RimeDeploy
     end
 
     def rollback
+    end
+
+    def backup_rime_config
+      path = File.expand_path(Store.config_path)
+      unless File.exist?(path)
+        puts "No existing Rime directory to back up."
+        return :next
+      end
+      unless File.directory?(path) && !File.symlink?(path)
+        raise RimeDeployError, "Rime path must be a real directory: #{path}"
+      end
+      backup = "#{path}.#{Time.now.strftime('%Y%m%d-%H%M%S-%N')}.old"
+      raise RimeDeployError, "Backup already exists: #{backup}" if File.exist?(backup)
+      puts "Moving the entire Rime directory to #{backup}"
+      puts "Old user dictionaries stay in this backup; a fresh clone does not restore them."
+      File.rename(path, backup)
+      :next
+    end
+
+    def clone_rime_config
+      path = File.expand_path(Store.config_path)
+      if File.exist?(path) || File.symlink?(path)
+        raise RimeDeployError, "Rime path already exists. Use Upgrade mode instead: #{path}"
+      end
+      unless system("git", "clone", "--depth=1", Config::RIME_CONFIG_REPO, path)
+        raise RimeDeployError, "Cloning failed. Existing backups have not been changed."
+      end
+      :next
+    end
+
+    def copy_custom_config
+      path = File.expand_path(Store.config_path)
+      raise RimeDeployError, "Rime directory does not exist: #{path}" unless File.directory?(path)
+
+      template_dir = File.expand_path("../custom", __dir__)
+      templates = Dir.glob("*.custom.yaml", base: template_dir).sort
+      raise RimeDeployError, "No custom templates found: #{template_dir}" if templates.empty?
+      backup = nil
+      templates.each do |name|
+        source = File.join(template_dir, name)
+        target = File.join(path, name)
+        if File.symlink?(target) || (File.exist?(target) && !File.file?(target))
+          raise RimeDeployError, "Refusing to overwrite a non-regular file: #{target}"
+        end
+        if File.exist?(target)
+          next if FileUtils.compare_file(source, target)
+
+          backup ||= Dir.mktmpdir("#{File.basename(path)}.custom-backup-", File.dirname(path))
+          FileUtils.cp(target, File.join(backup, name), preserve: true)
+          puts "Backup: #{File.join(backup, name)}"
+        end
+        Tempfile.create([".rime-custom-", ".yaml"], path) do |file|
+          file.close
+          FileUtils.cp(source, file.path)
+          File.rename(file.path, target)
+        end
+        puts "Applied #{target}"
+      end
+      puts "Only *.custom.yaml templates are applied; dictionaries and installation.yaml are untouched."
+      :next
+    end
+
+    def upgrade_repository(path)
+      unless system("git", "-C", path, "diff", "--quiet", "HEAD", "--")
+        raise RimeDeployError, "Tracked files have local changes, or Git could not check them. Back up and resolve them before upgrading."
+      end
+      unless system("git", "-C", path, "fetch")
+        raise RimeDeployError, "Git fetch failed. Working files have not been changed."
+      end
+      unless system("git", "-C", path, "merge", "--ff-only", "--no-overwrite-ignore", "@{upstream}")
+        raise RimeDeployError, "Git upgrade refused or failed. No reset, cleanup or reinstall was attempted."
+      end
+      :next
     end
   end
 
@@ -178,20 +259,24 @@ module RimeDeploy
     end
 
     def run_job_with_info_wrapper(current_job)
-      print_progress
-      begin
-        result = current_job.call
-        if result == :next
+      loop do
+        current_job.status = :processing
+        print_progress
+        begin
+          result = current_job.call
+          unless result == :next
+            current_job.rollback
+            raise RimeDeployError, "#{current_job.intro} failed."
+          end
           current_job.status = :done
           @current_index += 1
-        else
-          # 失败处理
-          current_job.rollback if current_job.respond_to? :rollback
-          raise RimeDeployError
+          print_progress
+          return
+        rescue RimeDeployError, SystemCallError => error
+          current_job.status = :fail
+          puts error.message.red
+          what_next
         end
-        print_progress
-      rescue RimeDeployError
-        what_next
       end
     end
 
@@ -218,6 +303,7 @@ module RimeDeploy
 
     def run_jobs_handle
       add_jobs_to_queue(self.class.jobs)
+      add_jobs_to_queue([ExportPersonalDataJob, RestorePersonalDataJob])
       halt_flag =
         catch :halt do
           clear_screen
@@ -247,22 +333,7 @@ module RimeDeploy
       halt_flag =
         catch :halt do
           while @current_index < @queue.length
-            current_job = @queue[@current_index]
-            current_job.status = :processing
-            print_progress
-            begin
-              result = current_job.call
-              if result == :next
-                current_job.status = :done
-                @current_index += 1
-              else
-                # 失败处理
-                raise RimeDeployError
-              end
-              print_progress
-            rescue RimeDeployError
-              what_next
-            end
+            run_job_with_info_wrapper(@queue[@current_index])
           end
         end
       reset_queue
@@ -289,11 +360,13 @@ module RimeDeploy
           end
         end
       reset_queue
+      run_jobs_handle if halt_flag == :handle_mode
       run_jobs_upgrade if halt_flag == :run_jobs_upgrade
     end
 
     def reset_queue
       @queue = []
+      @current_index = 0
     end
 
     def reset_status
@@ -307,7 +380,7 @@ module RimeDeploy
         [
           ["Retry", -> {}],
           ["Change to: Handle mode", -> { throw :halt, :handle_mode }],
-          ["Exit", -> { exit 0 }]
+          ["Exit", -> { exit 1 }]
         ]
       ).call
     end
